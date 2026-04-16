@@ -58,6 +58,10 @@ static RPCHelpMan sendrawtransaction()
              "Reject transactions with provably unspendable outputs (e.g. 'datacarrier' outputs that use the OP_RETURN opcode) greater than the specified value, expressed in " + CURRENCY_UNIT + ".\n"
              "If burning funds through unspendable outputs is desired, increase this value.\n"
              "This check is based on heuristics and does not guarantee spendability of outputs.\n"},
+            {"maxtotalburnamount", RPCArg::Type::AMOUNT, RPCArg::Default{FormatMoney(DEFAULT_MAX_BURN_AMOUNT)},
+             "Reject transactions where the combined value of all provably unspendable outputs exceeds the specified value, expressed in " + CURRENCY_UNIT + ".\n"
+             "If burning funds through unspendable outputs is desired, increase this value.\n"
+             "This check is based on heuristics and does not guarantee spendability of outputs.\n"},
         },
         RPCResult{
             RPCResult::Type::STR_HEX, "", "The transaction hash in hex"
@@ -74,16 +78,27 @@ static RPCHelpMan sendrawtransaction()
                 },
         [&](const RPCHelpMan& self, const JSONRPCRequest& request) -> UniValue
         {
-            const CAmount max_burn_amount = request.params[2].isNull() ? 0 : AmountFromValue(request.params[2]);
+            const CAmount max_individual_burn_amount = request.params[2].isNull() ? 0 : AmountFromValue(request.params[2]);
+            const bool check_total_burn = !request.params[3].isNull();
 
             CMutableTransaction mtx;
             if (!DecodeHexTx(mtx, request.params[0].get_str())) {
                 throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "TX decode failed. Make sure the tx has at least one input.");
             }
 
+            CAmount total_burn_amount = 0;
             for (const auto& out : mtx.vout) {
-                if((out.scriptPubKey.IsUnspendable() || !out.scriptPubKey.HasValidOps()) && out.nValue > max_burn_amount) {
-                    throw JSONRPCTransactionError(TransactionError::MAX_BURN_EXCEEDED);
+                if (out.scriptPubKey.IsUnspendable() || !out.scriptPubKey.HasValidOps()) {
+                    if (out.nValue > max_individual_burn_amount) {
+                        throw JSONRPCTransactionError(TransactionError::MAX_BURN_EXCEEDED);
+                    }
+                    total_burn_amount += out.nValue;
+                }
+            }
+            if (check_total_burn) {
+                const CAmount max_total_burn_amount = AmountFromValue(request.params[3]);
+                if (total_burn_amount > max_total_burn_amount) {
+                    throw JSONRPCTransactionError(TransactionError::MAX_TOTAL_BURN_EXCEEDED);
                 }
             }
 
@@ -951,6 +966,11 @@ static RPCHelpMan submitpackage()
              "If burning funds through unspendable outputs is desired, increase this value.\n"
              "This check is based on heuristics and does not guarantee spendability of outputs.\n"
             },
+            {"maxtotalburnamount", RPCArg::Type::AMOUNT, RPCArg::Default{FormatMoney(DEFAULT_MAX_BURN_AMOUNT)},
+             "Reject transactions where the combined value of all provably unspendable outputs exceeds the specified value, expressed in " + CURRENCY_UNIT + ".\n"
+             "If burning funds through unspendable outputs is desired, increase this value.\n"
+             "This check is based on heuristics and does not guarantee spendability of outputs.\n"
+            },
         },
         RPCResult{
             RPCResult::Type::OBJ, "", "",
@@ -999,7 +1019,8 @@ static RPCHelpMan submitpackage()
             }
 
             // Burn sanity check is run with no context
-            const CAmount max_burn_amount = request.params[2].isNull() ? 0 : AmountFromValue(request.params[2]);
+            const CAmount max_individual_burn_amount = request.params[2].isNull() ? 0 : AmountFromValue(request.params[2]);
+            const bool check_total_burn = !request.params[3].isNull();
 
             std::vector<CTransactionRef> txns;
             txns.reserve(raw_transactions.size());
@@ -1010,9 +1031,19 @@ static RPCHelpMan submitpackage()
                                        "TX decode failed: " + rawtx.get_str() + " Make sure the tx has at least one input.");
                 }
 
+                CAmount total_burn_amount = 0;
                 for (const auto& out : mtx.vout) {
-                    if((out.scriptPubKey.IsUnspendable() || !out.scriptPubKey.HasValidOps()) && out.nValue > max_burn_amount) {
-                        throw JSONRPCTransactionError(TransactionError::MAX_BURN_EXCEEDED);
+                    if (out.scriptPubKey.IsUnspendable() || !out.scriptPubKey.HasValidOps()) {
+                        if (out.nValue > max_individual_burn_amount) {
+                            throw JSONRPCTransactionError(TransactionError::MAX_BURN_EXCEEDED);
+                        }
+                        total_burn_amount += out.nValue;
+                    }
+                }
+                if (check_total_burn) {
+                    const CAmount max_total_burn_amount = AmountFromValue(request.params[3]);
+                    if (total_burn_amount > max_total_burn_amount) {
+                        throw JSONRPCTransactionError(TransactionError::MAX_TOTAL_BURN_EXCEEDED);
                     }
                 }
 
