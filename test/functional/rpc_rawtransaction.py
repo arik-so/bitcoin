@@ -404,6 +404,14 @@ class RawTransactionsTest(BitcoinTestFramework):
         tx_hex = tx.serialize().hex()
         self.nodes[2].sendrawtransaction(hexstring=tx_hex, maxfeerate='0', maxburnamount='0.001')
 
+        # Test a transaction with multiple burn outputs below the max value but exceeding the total burn amount
+        tx = self.wallet.create_self_transfer()['tx']
+        tx_val = 0.001
+        tx.vout = [CTxOut(int(Decimal(tx_val) * COIN), CScript([OP_RETURN] + [OP_FALSE] * 30)), CTxOut(int(Decimal(tx_val) * COIN), CScript([OP_RETURN] + [OP_FALSE] * 30))]
+        tx_hex = tx.serialize().hex()
+        assert_raises_rpc_error(-25, max_total_burn_exceeded, self.nodes[2].sendrawtransaction, tx_hex, 0, 0.001, 0.0019)
+
+
     def sendrawtransaction_testmempoolaccept_tests(self):
         self.log.info("Test sendrawtransaction/testmempoolaccept with maxfeerate")
         fee_exceeds_max = "Fee exceeds maximum configured by user (e.g. -maxtxfee, maxfeerate)"
